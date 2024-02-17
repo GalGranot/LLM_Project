@@ -27,7 +27,7 @@ class MultiHeadAttention(nn.Module):
         if mask is not None: #fill masked areas with negative infinity so it gets ignored
             attentionScores.masked_fill(mask == 0, -1e9)
         attentionProbabilites = torch.softmax(attentionScores, dim=-1) #FIXME why -1?
-        product = torch.matmul(attentionProbabilites)
+        product = torch.matmul(attentionProbabilites, value)
         return product
     
     def splitHeads(self, x):
@@ -36,7 +36,7 @@ class MultiHeadAttention(nn.Module):
     
     def combineHeads(self, x):
         batchSize, _, seqLength, dK = x.size()
-        return x.tranpose(1, 2).contiguous().view(batchSize, seqLength, self.dModel)
+        return x.transpose(1, 2).contiguous().view(batchSize, seqLength, self.dModel)
     
     def forward(self, query, key, value, mask=None): #perform linear transformations
         query = self.splitHeads(self.wQ(query))
@@ -52,8 +52,8 @@ class PositionWiseFeedForward(nn.Module):
         super(PositionWiseFeedForward, self).__init__()
         #two fully connected layers
         self.fc1 = nn.Linear(dModel, dFF)
-        self.fc2 = nn.Linear(dModel, dFF)
-        self.reLU = nn.ReLU()
+        self.fc2 = nn.Linear(dFF, dModel)
+        self.relu = nn.ReLU()
 
     def forward(self, x): #propagate through layers of network
         return self.fc2(self.relu(self.fc1(x)))
@@ -70,7 +70,7 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', pe.unsqueeze(0)) #use pe not as a trainable parameter
     
     def forward(self, x):
-        return x + self.pe[:, x.size(1)]
+        return x + self.pe[:, :x.size(1)]
     
 class EncoderLayer(nn.Module):
     def __init__(self, dModel, headsNum, dFF, droput):
@@ -110,6 +110,7 @@ class DecoderLayer(nn.Module):
     
 class Transformer(nn.Module):
     def __init__(self, sourceVocabSize, targetVocabSize, dModel, headsNum, numLayers,dFF, maxSeqLength, dropout):
+        super(Transformer, self).__init__()
         self.encoderEmbed = nn.Embedding(sourceVocabSize, dModel)
         self.decoderEmbed = nn.Embedding(targetVocabSize, dModel)
         self.positionEncoding = PositionalEncoding(dModel, maxSeqLength)
@@ -120,6 +121,69 @@ class Transformer(nn.Module):
         self.fc = nn.Linear(dModel, targetVocabSize)
         self.dropout = nn.Dropout(dropout)
 
-    def generateMask(self, source, target)
+    def generateMask(self, source, target):
         sourceMask = (source != 0).unsqueeze(1).unsqueeze(2)
         targetMask = (target != 0).unsqueeze(1).unsqueeze(3)
+        seqLength = target.size(1)
+        noPeakMask = (1 - torch.triu(torch.ones(1, seqLength, seqLength), diagonal=1)).bool()
+        targetMask = targetMask & noPeakMask 
+        return sourceMask, targetMask
+    
+    def forward(self, source, target):
+        sourceMask, targetMask = self.generateMask(source, target)
+        sourceEmbed = self.dropout(self.positionEncoding(self.encoderEmbed(source)))
+        targetEmbed = self.dropout(self.positionEncoding(self.decoderEmbed(target)))
+        
+        encodedOutput = sourceEmbed
+        for encoderLayer in self.encoderLayers:
+            encodedOutput = encoderLayer(encodedOutput, sourceMask)
+        decodedOutput = targetEmbed
+        for decoderLayer in self.decoderLayers:
+            decodedOutput = decoderLayer(decodedOutput, encodedOutput, sourceMask, targetMask)
+
+        return self.fc(decodedOutput)
+    
+def main():
+    src_vocab_size = 5000
+    tgt_vocab_size = 5000
+    d_model = 512
+    num_heads = 8
+    num_layers = 6
+    d_ff = 2048
+    max_seq_length = 100
+    dropout = 0.1
+
+    transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
+
+    # Generate random sample data
+    src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+
+    transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
+
+    criterion = nn.CrossEntropyLoss(ignore_index=0)
+    optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
+
+    transformer.train()
+
+    for epoch in range(100):
+        optimizer.zero_grad()
+        output = transformer(src_data, tgt_data[:, :-1])
+        loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
+        loss.backward()
+        optimizer.step()
+        print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+
+    transformer.eval()
+
+    # Generate random sample validation data
+    val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+
+    with torch.no_grad():
+        val_output = transformer(val_src_data, val_tgt_data[:, :-1])
+        val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
+        print(f"Validation Loss: {val_loss.item()}")
+    
+if __name__ == '__main__':
+    main()

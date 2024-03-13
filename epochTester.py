@@ -5,6 +5,7 @@ import torch.utils.data as data
 import math
 import copy
 import sys
+import numpy as np
 
 class MultiHeadAttention(nn.Module):
     #dmodel - dimension of input, headsNum - number of heads to share input
@@ -167,25 +168,49 @@ def main():
 
     transformer.train()
 
-    for epoch in range(100):
-        print(f"starting epoch {epoch + 1}")
-        optimizer.zero_grad()
-        output = transformer(src_data, tgt_data[:, :-1])
-        loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
-        loss.backward()
-        optimizer.step()
-        print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+    N = 2
+    lossRecord = []
+    for i in range(N):
+        for epoch in range(i):
+            print(f"iteration {i}, starting epoch {epoch + 1}")
+            optimizer.zero_grad()
+            output = transformer(src_data, tgt_data[:, :-1])
+            loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
+            loss.backward()
+            optimizer.step()
+            print(f"iteration {i}, Epoch: {epoch+1}, Loss: {loss.item()}")
+        transformer.eval()
 
-    transformer.eval()
+        # Generate random sample validation data
+        val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+        val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
 
-    # Generate random sample validation data
-    val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-    val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+        with torch.no_grad():
+            val_output = transformer(val_src_data, val_tgt_data[:, :-1])
+            val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
+            print(f"Validation Loss: {val_loss.item()}")
+            lossRecord.append(val_loss.item())
+    print(lossRecord)
 
-    with torch.no_grad():
-        val_output = transformer(val_src_data, val_tgt_data[:, :-1])
-        val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
-        print(f"Validation Loss: {val_loss.item()}")
+        
+    # for epoch in range(100):
+    #     print(f"starting epoch {epoch + 1}")
+    #     optimizer.zero_grad()
+    #     output = transformer(src_data, tgt_data[:, :-1])
+    #     loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
+    #     loss.backward()
+    #     optimizer.step()
+    #     print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
+    # transformer.eval()
+
+    # # Generate random sample validation data
+    # val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    # val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+
+    # with torch.no_grad():
+    #     val_output = transformer(val_src_data, val_tgt_data[:, :-1])
+    #     val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
+    #     print(f"Validation Loss: {val_loss.item()}")
     
 if __name__ == '__main__':
     main()

@@ -5,6 +5,7 @@ import torch.utils.data as data
 import math
 import copy
 import sys
+import torch.nn.functional as Functional
 
 class MultiHeadAttention(nn.Module):
     #dmodel - dimension of input, headsNum - number of heads to share input
@@ -144,9 +145,16 @@ class Transformer(nn.Module):
 
         return self.fc(decodedOutput)
     
+srcWordDict = {'<PAD>' : 0, 'hello' : 1, 'world' : 2, "gal" : 3}
+tgtWordDict = {'<PAD>' : 0, 'world' : 1, 'gal' : 2, "hello" : 3}
+
+def sentenceToTensor(sentence):
+    return torch.tensor([srcWordDict[word] for word in sentence.split()])
+
 def main():
-    src_vocab_size = 5000
-    tgt_vocab_size = 5000
+    print("Main")
+    src_vocab_size = len(srcWordDict)
+    tgt_vocab_size = len(tgtWordDict)
     d_model = 512
     num_heads = 8
     num_layers = 6
@@ -157,20 +165,21 @@ def main():
     transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
 
     # Generate random sample data
-    src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-    tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    src_data = sentenceToTensor("hello world")
+    tgt_data = sentenceToTensor("gal")
+    # src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    # tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
 
-    transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
-
+    print("Transformer training")
+    transformer.train()
+    print("Transformer finished training")
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
-    transformer.train()
-
-    for epoch in range(100):
+    for epoch in range(10):
         print(f"starting epoch {epoch + 1}")
         optimizer.zero_grad()
-        output = transformer(src_data, tgt_data[:, :-1])
+        output = transformer(src_data, tgt_data)
         loss = criterion(output.contiguous().view(-1, tgt_vocab_size), tgt_data[:, 1:].contiguous().view(-1))
         loss.backward()
         optimizer.step()
@@ -179,13 +188,28 @@ def main():
     transformer.eval()
 
     # Generate random sample validation data
-    val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-    val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    val_src_data = sentenceToTensor("hello world")
+    val_tgt_data = sentenceToTensor("gal")
+    # val_src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    # val_tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
 
     with torch.no_grad():
         val_output = transformer(val_src_data, val_tgt_data[:, :-1])
         val_loss = criterion(val_output.contiguous().view(-1, tgt_vocab_size), val_tgt_data[:, 1:].contiguous().view(-1))
         print(f"Validation Loss: {val_loss.item()}")
-    
+        predictions = torch.argmax(Functional.softmax(val_output, dim=-1), dim=-1)
+        print(predictions)
+    predicted_words = []
+
+    for sentence in predictions:
+        predicted_sentence = []
+        for idx in sentence:
+            predicted_sentence.append(list(tgtWordDict.keys())[idx.item()])
+        predicted_words.append(predicted_sentence)
+
+    print("Predicted Words:")
+    for sentence in predicted_words:
+        print(" ".join(sentence))
+   
 if __name__ == '__main__':
     main()

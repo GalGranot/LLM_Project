@@ -6,6 +6,11 @@ import math
 import copy
 import sys
 import torch.nn.functional as Functional
+import tiktoken
+
+
+# To get the tokeniser corresponding to a specific model in the OpenAI API:
+enc = tiktoken.encoding_for_model("gpt-4")
 
 class MultiHeadAttention(nn.Module):
     #dmodel - dimension of input, headsNum - number of heads to share input
@@ -144,31 +149,57 @@ class Transformer(nn.Module):
             decodedOutput = decoderLayer(decodedOutput, encodedOutput, sourceMask, targetMask)
 
         return self.fc(decodedOutput)
-    
-srcWordDict = {'<PAD>' : 0, 'hello' : 1, 'world' : 2, "gal" : 3}
-tgtWordDict = {'<PAD>' : 0, 'world' : 1, 'gal' : 2, "hello" : 3}
 
-def sentenceToTensor(sentence):
-    return torch.tensor([srcWordDict[word] for word in sentence.split()])
+
+def data():
+    dataPath = "/Users/galgranot/Documents/galag/school/Project/data/attention.txt"
+    enc = tiktoken.get_encoding("cl100k_base")
+    assert enc.decode(enc.encode("hello world")) == "hello world"
+    vocabSize = 0
+    srcWordDict = {}
+    with open(dataPath, "r") as f:
+        lines = f.readlines()
+        for line in lines:
+            srcWordDict[line] = enc.encode(line)
+            vocabSize = max(len(enc.encode(line)), 0)
+        #tgtWordDict = {line[0:len(line) - 1] : enc.encode(line[0:len(line) - 1]) for line in lines} #TODO rmv this!!!
+        tgtWordDict = srcWordDict
+    return srcWordDict, tgtWordDict, vocabSize
+
+# def sentenceToTensor(sentence):
+#     return torch.tensor([srcWordDict[word] for word in sentence.split()])
 
 def main():
     print("Main")
-    src_vocab_size = len(srcWordDict)
-    tgt_vocab_size = len(tgtWordDict)
+    srcWordDict, tgtWordDict, _ = data()
+    src_vocab_size = 100
+    tgt_vocab_size = 100
     d_model = 512
     num_heads = 8
     num_layers = 6
     d_ff = 2048
-    max_seq_length = 100
+    #max_seq_length = 100
+    max_seq_length = max(src_vocab_size, tgt_vocab_size)
     dropout = 0.1
 
     transformer = Transformer(src_vocab_size, tgt_vocab_size, d_model, num_heads, num_layers, d_ff, max_seq_length, dropout)
 
-    # Generate random sample data
-    src_data = sentenceToTensor("hello world")
-    tgt_data = sentenceToTensor("gal")
-    # src_data = torch.randint(1, src_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
-    # tgt_data = torch.randint(1, tgt_vocab_size, (64, max_seq_length))  # (batch_size, seq_length)
+    numsLists = list(srcWordDict.values())
+    srcMat = []
+    maxElement = 0
+    for i in range(0, len(numsLists)):
+        row = []
+        for j in range(0, max_seq_length):
+            row.append(numsLists[i][j] if j < len(numsLists[i]) else 0)
+            maxElement = max(maxElement, row[j])
+        srcMat.append(row)
+
+    src_vocab_size = maxElement
+    tgt_vocab_size = maxElement
+    tgtMat = srcMat
+
+    src_data = torch.tensor(srcMat)
+    tgt_data = torch.tensor(tgtMat)
 
     print("Transformer training")
     transformer.train()
@@ -176,7 +207,7 @@ def main():
     criterion = nn.CrossEntropyLoss(ignore_index=0)
     optimizer = optim.Adam(transformer.parameters(), lr=0.0001, betas=(0.9, 0.98), eps=1e-9)
 
-    for epoch in range(10):
+    for epoch in range(1):
         print(f"starting epoch {epoch + 1}")
         optimizer.zero_grad()
         output = transformer(src_data, tgt_data)
@@ -186,7 +217,7 @@ def main():
         print(f"Epoch: {epoch+1}, Loss: {loss.item()}")
 
     transformer.eval()
-
+    exit(0)
     # Generate random sample validation data
     val_src_data = sentenceToTensor("hello world")
     val_tgt_data = sentenceToTensor("gal")
